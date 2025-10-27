@@ -14,3 +14,4 @@ urlencoding = "2"
 time = { version = "0.3", features = ["formatting"] }
 rfd = "0.14"
 anyhow = "1"
+arboard = "3"

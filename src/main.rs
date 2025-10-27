@@ -5,6 +5,7 @@ use iced::{Application, Command, Element, Length, Settings};
 use regex::Regex;
 use rfd::FileDialog;
 use std::time::{SystemTime, UNIX_EPOCH};
+use arboard::Clipboard;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Format {
@@ -27,6 +28,7 @@ enum Message {
     FormatChanged(Format),
     DownloadClicked,
     Fetched(std::result::Result<String, String>),
+    PasteClicked,
 }
 
 struct App {
@@ -35,6 +37,7 @@ struct App {
     status: String,
     preview: String,
     formats: Vec<Format>,
+    logs: Vec<String>,
 }
 
 impl Application for App {
@@ -51,18 +54,21 @@ impl Application for App {
                 status: String::new(),
                 preview: String::new(),
                 formats: vec![Format::Markdown, Format::PdfDisabled],
+                logs: Vec::new(),
             },
             Command::none(),
         )
     }
 
     fn title(&self) -> String {
-        "ShareSaver (Rust/Iced)".into()
+        "Kraken".into()
     }
 
     fn theme(&self) -> Theme {
         theme::Theme::Dark
     }
+
+    // no subscriptions needed
 
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
         match message {
@@ -72,10 +78,17 @@ impl Application for App {
             Message::FormatChanged(fmt) => {
                 self.format = fmt;
             }
+            Message::PasteClicked => {
+                if let Some(txt) = read_clipboard_text() {
+                    self.url = txt;
+                    self.push_log("Pasted URL from clipboard");
+                }
+            }
             Message::DownloadClicked => {
-                self.status.clear();
+                self.status = "Downloading...".into();
                 self.preview.clear();
                 let url = self.url.clone();
+                self.push_log(&format!("Start download: {}", url));
                 return Command::perform(async move {
                     fetch_and_convert(url).await.map_err(|e| e.to_string())
                 }, Message::Fetched);
@@ -83,7 +96,8 @@ impl Application for App {
             Message::Fetched(res) => match res {
                 Ok(md) => {
                     self.preview = md.clone();
-                    self.status = "Готово. Выберите путь для сохранения.".into();
+                    self.status = "Ready. Choose where to save.".into();
+                    self.push_log("Fetched & parsed successfully");
 
                     if let Format::Markdown = self.format {
                         if let Some(path) = FileDialog::new()
@@ -92,16 +106,20 @@ impl Application for App {
                             .save_file()
                         {
                             let _ = std::fs::write(path, md);
-                            self.status = "Сохранено".into();
+                            self.status = "Saved".into();
+                            self.push_log("File saved");
                         } else {
-                            self.status = "Сохранение отменено".into();
+                            self.status = "Save cancelled".into();
+                            self.push_log("Save cancelled");
                         }
                     } else {
-                        self.status = "PDF пока недоступен".into();
+                        self.status = "PDF is disabled for now".into();
+                        self.push_log("PDF is disabled");
                     }
                 }
                 Err(e) => {
-                    self.status = format!("Ошибка: {}", e);
+                    self.status = format!("Error: {}", e);
+                    self.push_log(&format!("Error: {}", e));
                 }
             },
         }
@@ -111,20 +129,23 @@ impl Application for App {
     fn view(&self) -> Element<'_, Self::Message> {
         let url_input = text_input("https://chatgpt.com/share/...", &self.url)
             .on_input(Message::UrlChanged)
+            .on_paste(|s| Message::UrlChanged(s))
             .width(Length::Fill);
 
         let fmt_combo = pick_list(self.formats.clone(), Some(self.format.clone()), Message::FormatChanged);
 
-        let download_btn = button(text("Скачать")).on_press(Message::DownloadClicked);
+        let paste_btn = button(text("Paste")).on_press(Message::PasteClicked);
+        let download_btn = button(text("Download")).on_press(Message::DownloadClicked);
 
         let top = row![
-            text("Публичная ссылка:").width(Length::Shrink),
+            text("Public link:").width(Length::Shrink),
             url_input,
+            paste_btn,
         ]
         .spacing(8);
 
         let second = row![
-            text("Формат:").width(Length::Shrink),
+            text("Format:").width(Length::Shrink),
             fmt_combo,
             download_btn,
             text(&self.status)
@@ -134,7 +155,10 @@ impl Application for App {
 
         let preview = scrollable(container(text(&self.preview)).padding(8)).height(Length::Fill);
 
-        container(column![top, second, preview].spacing(12).padding(12))
+        let logs_joined = if self.logs.is_empty() { String::from("(log is empty)") } else { self.logs.join("\n") };
+        let log_panel = scrollable(container(text(logs_joined)).padding(8)).height(Length::Fixed(120.0));
+
+        container(column![top, second, preview, text("Log:"), log_panel].spacing(12).padding(12))
             .width(Length::Fill)
             .height(Length::Fill)
             .center_x()
@@ -284,4 +308,18 @@ fn extract_share_id(normalized: &str) -> Option<String> {
 
 fn json_unescape(s: &str) -> String {
     serde_json::from_str::<String>(&format!("\"{}\"", s)).unwrap_or_else(|_| s.to_string())
+}
+
+fn read_clipboard_text() -> Option<String> {
+    Clipboard::new().ok()?.get_text().ok()
+}
+
+impl App {
+    fn push_log(&mut self, line: &str) {
+        self.logs.push(line.to_string());
+        if self.logs.len() > 500 { // keep last 500 lines
+            let excess = self.logs.len() - 500;
+            self.logs.drain(0..excess);
+        }
+    }
 }

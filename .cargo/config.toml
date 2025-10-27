@@ -1,0 +1,8 @@
+[target.aarch64-unknown-linux-gnu]
+linker = "aarch64-linux-gnu-gcc"
+ar = "aarch64-linux-gnu-ar"
+
+# You can add more targets here if needed
+# [target.x86_64-unknown-linux-gnu]
+# linker = "gcc"
+
