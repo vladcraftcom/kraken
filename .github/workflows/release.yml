@@ -18,22 +18,22 @@ jobs:
         include:
           - os: macos-14
             target: aarch64-apple-darwin
-            artifact: kraken-Darwin-arm64
+            base_name: kraken-Darwin-arm64
           - os: macos-13
             target: x86_64-apple-darwin
-            artifact: kraken-Darwin-x86_64
+            base_name: kraken-Darwin-x86_64
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-            artifact: kraken-Linux-x86_64
+            base_name: kraken-Linux-x86_64
           - os: ubuntu-22.04
             target: aarch64-unknown-linux-gnu
-            artifact: kraken-Linux-arm64
+            base_name: kraken-Linux-arm64
           - os: windows-2022
             target: x86_64-pc-windows-msvc
-            artifact: kraken-Windows-x86_64.exe
+            base_name: kraken-Windows-x86_64
           - os: windows-2022
             target: aarch64-pc-windows-msvc
-            artifact: kraken-Windows-arm64.exe
+            base_name: kraken-Windows-arm64
 
     steps:
       - uses: actions/checkout@v4
@@ -58,22 +58,49 @@ jobs:
         run: |
           cargo build -r --target ${{ matrix.target }}
 
-      - name: Prepare artifact name
-        id: prep
+      - name: Package artifact
+        id: pack
         shell: bash
         run: |
-          BIN_NAME=kraken
-          EXT=""
-          case "${{ matrix.target }}" in \
-            *windows*) EXT=".exe" ;; \
+          set -euo pipefail
+          TARGET="${{ matrix.target }}"
+          BASE="${{ matrix.base_name }}"
+          BIN_DIR="target/${TARGET}/release"
+          # Detect source binary
+          SRC_EXE="${BIN_DIR}/kraken"
+          case "$TARGET" in
+            *windows*) SRC_EXE="${BIN_DIR}/kraken.exe" ;;
           esac
-          echo "ext=$EXT" >> $GITHUB_OUTPUT
+          # Package per OS
+          case "${{ matrix.os }}" in
+            macos-*)
+              OUT_NAME="${BASE}.dmg"
+              STAGE="${BIN_DIR}/stage"
+              mkdir -p "$STAGE"
+              cp "$SRC_EXE" "$STAGE/kraken"
+              hdiutil create -volname "Kraken" -srcfolder "$STAGE" -ov -format UDZO "${BIN_DIR}/${OUT_NAME}"
+              echo "out_name=${OUT_NAME}" >> $GITHUB_OUTPUT
+              echo "out_path=${BIN_DIR}/${OUT_NAME}" >> $GITHUB_OUTPUT
+              ;;
+            ubuntu-*)
+              OUT_NAME="${BASE}.tar.gz"
+              (cd "$BIN_DIR" && tar czf "$OUT_NAME" "$(basename "$SRC_EXE")")
+              echo "out_name=${OUT_NAME}" >> $GITHUB_OUTPUT
+              echo "out_path=${BIN_DIR}/${OUT_NAME}" >> $GITHUB_OUTPUT
+              ;;
+            windows-*)
+              OUT_NAME="${BASE}.exe"
+              cp "$SRC_EXE" "${BIN_DIR}/${OUT_NAME}"
+              echo "out_name=${OUT_NAME}" >> $GITHUB_OUTPUT
+              echo "out_path=${BIN_DIR}/${OUT_NAME}" >> $GITHUB_OUTPUT
+              ;;
+          esac
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: target/${{ matrix.target }}/release/kraken${{ steps.prep.outputs.ext }}
+          name: ${{ steps.pack.outputs.out_name }}
+          path: ${{ steps.pack.outputs.out_path }}
 
   release:
     needs: build-matrix
@@ -91,7 +118,10 @@ jobs:
         with:
           draft: false
           prerelease: false
+          fail_on_unmatched_files: true
           files: |
-            dist/**/kraken*
+            dist/**/kraken-*.dmg
+            dist/**/kraken-*.tar.gz
+            dist/**/kraken-*.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
