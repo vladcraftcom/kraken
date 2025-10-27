@@ -1,0 +1,33 @@
+repos:
+- repo: https://github.com/pre-commit/pre-commit-hooks
+  rev: v4.6.0
+  hooks:
+  - id: check-merge-conflict
+  - id: end-of-file-fixer
+  - id: trailing-whitespace
+  - id: mixed-line-ending
+
+- repo: local
+  hooks:
+  - id: cargo-fmt
+    name: cargo fmt
+    entry: bash -c 'cargo fmt --all'
+    language: system
+    types: [rust]
+    pass_filenames: false
+  - id: cargo-clippy
+    name: cargo clippy
+    entry: bash -c 'cargo clippy --all-targets --all-features -- -D warnings || true'
+    language: system
+    types: [rust]
+    pass_filenames: false
+  - id: forbid-binaries-in-repo
+    name: forbid committing binaries
+    entry: bash -c 'git diff --cached --name-only | xargs -I{} file -b --mime {} | grep -q "charset=binary" && echo "Binary files detected in staged changes" && exit 1 || exit 0'
+    language: system
+    pass_filenames: false
+  - id: ensure-rust-targets
+    name: ensure rust targets installed
+    entry: bash -c 'rustup target add x86_64-apple-darwin aarch64-apple-darwin x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu x86_64-pc-windows-gnu aarch64-pc-windows-gnu || true'
+    language: system
+    pass_filenames: false
